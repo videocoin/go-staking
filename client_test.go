@@ -51,7 +51,7 @@ func (s *StakingSuite) SetupTest() {
 		big.NewInt(1),
 		big.NewInt(100),
 		big.NewInt(0),
-		big.NewInt(1000000),
+		big.NewInt(0),
 		big.NewInt(0),
 		common.Address{2, 2, 2},
 	)
@@ -137,4 +137,44 @@ func (s *ClientSuite) TestGetTranscoders() {
 		s.Require().Equal(s.FundedKeys[i].From, transcoders[i].Address)
 		s.Require().Equal(StateBonding, transcoders[i].State)
 	}
+}
+
+func (s *ClientSuite) TestTranscoderWithdraw() {
+	transcoder := s.FundedKeys[0]
+
+	tx, err := s.Contract.RegisterTranscoder(transcoder, big.NewInt(17))
+	s.Require().NoError(err)
+	_, err = bind.WaitMined(context.TODO(), s.Client, tx)
+	s.Require().NoError(err)
+
+	// delegate enough funds to transition to bonded state
+	opts := *transcoder
+	opts.Value = big.NewInt(1e15)
+	tx, err = s.Contract.Delegate(&opts, transcoder.From)
+	s.Require().NoError(err)
+	_, err = bind.WaitMined(context.TODO(), s.Client, tx)
+	s.Require().NoError(err)
+
+	state, err := s.StakingClient.GetTranscoderState(context.TODO(), transcoder.From)
+	s.Require().NoError(err)
+	s.Require().Equal(StateBonded, state)
+
+	tx, err = s.Contract.RequestUnbonding(transcoder, transcoder.From, big.NewInt(1e14))
+	_, err = bind.WaitMined(context.TODO(), s.Client, tx)
+	s.Require().NoError(err)
+
+	// usually it won't be "true" immediatly, in the test unbondingPeriod is 0
+	exist, err := s.Contract.PendingWithdrawalsExist(&bind.CallOpts{From: transcoder.From})
+	s.Require().NoError(err)
+	s.Require().True(exist)
+
+	// withdraw all pending will withdraw in order, in case if RequestUnbonding was called several times
+	tx, err = s.Contract.WithdrawAllPending(transcoder)
+	s.Require().NoError(err)
+	_, err = bind.WaitMined(context.TODO(), s.Client, tx)
+	s.Require().NoError(err)
+
+	exist, err = s.Contract.PendingWithdrawalsExist(&bind.CallOpts{From: transcoder.From})
+	s.Require().NoError(err)
+	s.Require().False(exist)
 }
