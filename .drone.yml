@@ -1,0 +1,15 @@
+kind: pipeline
+type: docker
+name: tests
+
+steps:
+- name: tests
+  image: golang:1.13
+  commands:
+  - go test ./... -v
+
+trigger:
+  branch:
+  - master
+  event:
+  - pull_request
