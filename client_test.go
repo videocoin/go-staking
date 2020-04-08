@@ -2,53 +2,44 @@ package staking
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"errors"
 	"math/big"
-	"sort"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind/backends"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/stretchr/testify/suite"
 	"github.com/videocoin/go-protocol/staking"
-	"github.com/videocoin/go-staking/testtools"
 )
 
 type StakingSuite struct {
 	suite.Suite
 
-	Node     *testtools.Node
-	Client   *ethclient.Client
-	Contract *staking.StakingManager
+	FundedKeys []*ecdsa.PrivateKey
+	Backend    *backends.SimulatedBackend
+	Contract   *staking.StakingManager
 }
 
 func (s *StakingSuite) SetupTest() {
-	ctx := context.TODO()
+	alloc := core.GenesisAlloc{}
+	for i := 0; i < 20; i++ {
+		pkey, err := crypto.GenerateKey()
+		s.Require().NoError(err)
+		opts := bind.NewKeyedTransactor(pkey)
+		s.FundedKeys = append(s.FundedKeys, pkey)
+		alloc[opts.From] = core.GenesisAccount{Balance: new(big.Int).SetUint64(^uint64(0))}
+	}
 
-	node := testtools.DefaultNode()
-	s.Require().NoError(node.Start())
+	s.Backend = backends.NewSimulatedBackend(alloc, ^uint64(0))
 
-	s.Node = node
-	client := node.Client()
-	s.Client = client
-
-	owner, err := crypto.GenerateKey()
-	s.Require().NoError(err)
-
-	tx, err := node.FaucetService().Request(ctx, crypto.PubkeyToAddress(owner.PublicKey), new(big.Int).SetUint64(1e17))
-	s.Require().NoError(err)
-	_, err = bind.WaitMined(ctx, client, tx)
-	s.Require().NoError(err)
-
-	auth := bind.NewKeyedTransactor(owner)
-
-	_, tx, contract, err := staking.DeployStakingManager(auth,
-		client,
-		big.NewInt(1),
+	_, _, contract, err := staking.DeployStakingManager(bind.NewKeyedTransactor(s.FundedKeys[0]),
+		s.Backend,
+		big.NewInt(10),
 		big.NewInt(100),
 		big.NewInt(0),
 		big.NewInt(0),
@@ -56,13 +47,12 @@ func (s *StakingSuite) SetupTest() {
 		common.Address{2, 2, 2},
 	)
 	s.Require().NoError(err)
-	_, err = bind.WaitMined(ctx, client, tx)
-	s.Require().NoError(err)
+	s.Backend.Commit()
 	s.Contract = contract
 }
 
 func (s *StakingSuite) TearDownTest() {
-	s.NoError(s.Node.Stop()) // assert is intentional
+	s.FundedKeys = nil
 }
 
 func TestClient(t *testing.T) {
@@ -72,69 +62,46 @@ func TestClient(t *testing.T) {
 type ClientSuite struct {
 	StakingSuite
 
-	FundedKeys    []*bind.TransactOpts
+	ctx    context.Context
+	cancel func()
+
 	StakingClient *Client
 }
 
 func (s *ClientSuite) SetupTest() {
 	s.StakingSuite.SetupTest()
-	var (
-		wg          sync.WaitGroup
-		mu          sync.Mutex
-		ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
-	)
-	defer cancel()
-	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			pkey, err := crypto.GenerateKey()
-			s.Require().NoError(err)
-			auth := bind.NewKeyedTransactor(pkey)
-			mu.Lock()
-			tx, err := s.Node.FaucetService().Request(ctx, auth.From, big.NewInt(1e18))
-			mu.Unlock()
-			s.Require().NoError(err)
-			receipt, err := bind.WaitMined(ctx, s.Client, tx)
-			s.Require().NoError(err)
-			s.Require().Equal(types.ReceiptStatusSuccessful, receipt.Status)
-			mu.Lock()
-			s.FundedKeys = append(s.FundedKeys, auth)
-			mu.Unlock()
-		}()
-	}
-	wg.Wait()
-	// sort keys alphabetically for easier comparison
-	sort.Slice(s.FundedKeys, func(i, j int) bool {
-		return s.FundedKeys[i].From.String() < s.FundedKeys[j].From.String()
-	})
-
-	s.StakingClient = NewClient(s.Contract)
+	s.StakingClient = NewClient(s.Backend, s.Contract)
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+	go func() {
+		for {
+			select {
+			case <-s.ctx.Done():
+				return
+			default:
+				s.Backend.Commit()
+			}
+		}
+	}()
 }
 
 func (s *ClientSuite) TeatDownTest() {
 	s.StakingSuite.TearDownTest()
-	s.FundedKeys = nil
+	s.cancel()
 }
 
 func (s *ClientSuite) TestGetTranscoders() {
-	txs := []*types.Transaction{}
-	for _, opts := range s.FundedKeys {
-		tx, err := s.Contract.RegisterTranscoder(opts, big.NewInt(17))
+	for _, pkey := range s.FundedKeys {
+		err := s.StakingClient.RegisterTranscoder(context.Background(), pkey, 10)
 		s.Require().NoError(err)
-		txs = append(txs, tx)
 	}
-	_, err := bind.WaitMined(context.TODO(), s.Client, txs[len(txs)-1])
-	s.Require().NoError(err)
 
 	transcoders, err := s.StakingClient.GetAllTranscoders(context.Background())
 	s.Require().NoError(err)
 	s.Require().Len(transcoders, len(s.FundedKeys))
-	sort.Slice(transcoders, func(i, j int) bool {
-		return transcoders[i].Address.String() < transcoders[j].Address.String()
-	})
+
 	for i := range transcoders {
-		s.Require().Equal(s.FundedKeys[i].From, transcoders[i].Address)
+		opts := bind.NewKeyedTransactor(s.FundedKeys[i])
+		s.Require().Equal(opts.From, transcoders[i].Address)
 		s.Require().Equal(StateBonding, transcoders[i].State)
 	}
 }
@@ -142,39 +109,144 @@ func (s *ClientSuite) TestGetTranscoders() {
 func (s *ClientSuite) TestTranscoderWithdraw() {
 	transcoder := s.FundedKeys[0]
 
-	tx, err := s.Contract.RegisterTranscoder(transcoder, big.NewInt(17))
-	s.Require().NoError(err)
-	_, err = bind.WaitMined(context.TODO(), s.Client, tx)
+	err := s.StakingClient.RegisterTranscoder(s.ctx, transcoder, 10)
 	s.Require().NoError(err)
 
 	// delegate enough funds to transition to bonded state
-	opts := *transcoder
-	opts.Value = big.NewInt(1e15)
-	tx, err = s.Contract.Delegate(&opts, transcoder.From)
-	s.Require().NoError(err)
-	_, err = bind.WaitMined(context.TODO(), s.Client, tx)
+	addr := crypto.PubkeyToAddress(transcoder.PublicKey)
+	err = s.StakingClient.Delegate(s.ctx, transcoder, addr, big.NewInt(1e15))
 	s.Require().NoError(err)
 
-	state, err := s.StakingClient.GetTranscoderState(context.TODO(), transcoder.From)
+	state, err := s.StakingClient.GetTranscoderState(context.TODO(), addr)
 	s.Require().NoError(err)
 	s.Require().Equal(StateBonded, state)
 
-	tx, err = s.Contract.RequestUnbonding(transcoder, transcoder.From, big.NewInt(1e14))
-	_, err = bind.WaitMined(context.TODO(), s.Client, tx)
+	amount := big.NewInt(1e14)
+	info, err := s.StakingClient.RequestWithdrawal(s.ctx, transcoder, addr, amount)
+	s.Require().NoError(err)
+	s.Require().Nil(info.Amount)
+	s.Require().NotEqual(info.ReadinessTimestamp, 0)
+
+	info, err = s.StakingClient.CompleteWithdrawals(s.ctx, transcoder)
+	s.Require().NoError(err)
+	s.Require().NotNil(info.Amount)
+	s.Require().Equal(amount.Int64(), info.Amount.Int64())
+
+	_, err = s.StakingClient.CompleteWithdrawals(s.ctx, transcoder)
+	s.Require().True(errors.Is(err, ErrNoPendingWithdrawals))
+}
+
+func (s *ClientSuite) TestRequestCompletedImmediatly() {
+	transcoder := s.FundedKeys[0]
+
+	err := s.StakingClient.RegisterTranscoder(s.ctx, transcoder, 10)
 	s.Require().NoError(err)
 
-	// usually it won't be "true" immediatly, in the test unbondingPeriod is 0
-	exist, err := s.Contract.PendingWithdrawalsExist(&bind.CallOpts{From: transcoder.From})
-	s.Require().NoError(err)
-	s.Require().True(exist)
+	amount := big.NewInt(50)
 
-	// withdraw all pending will withdraw in order, in case if RequestUnbonding was called several times
-	tx, err = s.Contract.WithdrawAllPending(transcoder)
-	s.Require().NoError(err)
-	_, err = bind.WaitMined(context.TODO(), s.Client, tx)
+	// delegate enough funds to transition to bonded state
+	addr := crypto.PubkeyToAddress(transcoder.PublicKey)
+	err = s.StakingClient.Delegate(s.ctx, transcoder, addr, amount)
 	s.Require().NoError(err)
 
-	exist, err = s.Contract.PendingWithdrawalsExist(&bind.CallOpts{From: transcoder.From})
+	info, err := s.StakingClient.RequestWithdrawal(s.ctx, transcoder, addr, amount)
 	s.Require().NoError(err)
-	s.Require().False(exist)
+	s.Require().Equal(amount.Int64(), info.Amount.Int64())
+	s.Require().Empty(info.ReadinessTimestamp)
+}
+
+func (s *ClientSuite) TestDelegatedStake() {
+	err := s.StakingClient.RegisterTranscoder(s.ctx, s.FundedKeys[0], 10)
+	s.Require().NoError(err)
+
+	amount := big.NewInt(50)
+
+	// delegate enough funds to transition to bonded state
+	addr := crypto.PubkeyToAddress(s.FundedKeys[0].PublicKey)
+	err = s.StakingClient.Delegate(s.ctx, s.FundedKeys[1], addr, amount)
+	s.Require().NoError(err)
+
+	transcoder, err := s.StakingClient.GetTranscoder(s.ctx, addr)
+	s.Require().NoError(err)
+	s.Require().Empty(transcoder.SelfStake.Int64())
+	s.Require().Equal(amount.Int64(), transcoder.DelegatedStake.Int64())
+	s.Require().Equal(amount.Int64(), transcoder.TotalStake.Int64())
+}
+
+func (s *ClientSuite) TestCompleteMultiple() {
+	err := s.StakingClient.RegisterTranscoder(s.ctx, s.FundedKeys[0], 10)
+	s.Require().NoError(err)
+
+	amount := big.NewInt(1000)
+
+	// delegate enough funds to transition to bonded state
+	addr := crypto.PubkeyToAddress(s.FundedKeys[0].PublicKey)
+	err = s.StakingClient.Delegate(s.ctx, s.FundedKeys[0], addr, amount)
+	s.Require().NoError(err)
+
+	for i := 0; i < 4; i++ {
+		info, err := s.StakingClient.RequestWithdrawal(s.ctx, s.FundedKeys[0], addr, big.NewInt(250))
+		s.Require().NoError(err)
+		s.Require().NotEmpty(info.ReadinessTimestamp)
+	}
+
+	info, err := s.StakingClient.CompleteWithdrawals(s.ctx, s.FundedKeys[0])
+	s.Require().NoError(err)
+	s.Require().Equal(amount.Int64(), info.Amount.Int64())
+}
+
+func (s *ClientSuite) TestTransitionToBondedWithSeveralDelegates() {
+	err := s.StakingClient.RegisterTranscoder(s.ctx, s.FundedKeys[0], 10)
+	s.Require().NoError(err)
+	addr := crypto.PubkeyToAddress(s.FundedKeys[0].PublicKey)
+	for i := 0; i < 3; i++ {
+		err := s.StakingClient.Delegate(s.ctx, s.FundedKeys[0], addr, big.NewInt(40))
+		s.Require().NoError(err)
+	}
+	transcoders, err := s.StakingClient.GetBondedTranscoders(s.ctx)
+	s.Require().NoError(err)
+	s.Require().Len(transcoders, 1)
+	s.Require().Equal(addr, transcoders[0].Address)
+}
+
+func (s *ClientSuite) TestWaitWithdrawalCompletedTimeout() {
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	_, err := s.StakingClient.WaitWithdrawalsCompleted(ctx, s.FundedKeys[0])
+	s.Require().True(errors.Is(err, context.DeadlineExceeded))
+}
+
+func (s *ClientSuite) TEstWaithWithdrawalCompletedSuccess() {
+	var (
+		transcoder  = s.FundedKeys[0]
+		infos       = make(chan WithdrawalInfo, 1)
+		ctx, cancel = context.WithTimeout(context.Background(), 2*time.Second)
+	)
+	defer cancel()
+	go func() {
+		info, err := s.StakingClient.WaitWithdrawalsCompleted(ctx, s.FundedKeys[0])
+		s.Require().NoError(err)
+		infos <- info
+	}()
+
+	err := s.StakingClient.RegisterTranscoder(s.ctx, transcoder, 10)
+	s.Require().NoError(err)
+
+	// delegate enough funds to transition to bonded state
+	addr := crypto.PubkeyToAddress(transcoder.PublicKey)
+	err = s.StakingClient.Delegate(s.ctx, transcoder, addr, big.NewInt(1e15))
+	s.Require().NoError(err)
+
+	amount := big.NewInt(1e15)
+	info, err := s.StakingClient.RequestWithdrawal(s.ctx, transcoder, addr, amount)
+	s.Require().NoError(err)
+	s.Require().Nil(info.Amount)
+	s.Require().NotEqual(info.ReadinessTimestamp, 0)
+
+	select {
+	case <-ctx.Done():
+		s.Require().FailNow(ctx.Err().Error())
+	case info := <-infos:
+		s.Require().Equal(amount.Int64(), info.Amount.Int64())
+	}
 }
