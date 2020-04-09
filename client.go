@@ -86,6 +86,10 @@ func (c *Client) GetTranscoderStake(ctx context.Context, address common.Address)
 	return c.contract.GetTotalStake(&bind.CallOpts{Context: ctx}, address)
 }
 
+func (c *Client) GetDelegatorStake(ctx context.Context, transcoder, delegator common.Address) (*big.Int, error) {
+	return c.contract.GetDelegatorStake(&bind.CallOpts{Context: ctx}, transcoder, delegator)
+}
+
 func (c *Client) GetTranscoderCapacity(ctx context.Context, address common.Address) (*big.Int, error) {
 	info, err := c.contract.Transcoders(&bind.CallOpts{Context: ctx}, address)
 	if err != nil {
