@@ -11,7 +11,6 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/videocoin/go-protocol/staking"
 )
 
@@ -30,27 +29,20 @@ var (
 
 // ETHBackend is a subset of ethereum rpc methods that are used in staking Client.
 type ETHBackend interface {
-	bind.DeployBackend
+	bind.ContractBackend
+	TransactionReceipt(context.Context, common.Hash) (*types.Receipt, error)
 	HeaderByNumber(context.Context, *big.Int) (*types.Header, error)
 }
 
-func Dial(rawurl string, address common.Address) (*Client, error) {
-	client, err := ethclient.Dial(rawurl)
-	if err != nil {
-		return nil, err
-	}
+func NewClient(client ETHBackend, address common.Address) (*Client, error) {
 	contract, err := staking.NewStakingManager(address, client)
 	if err != nil {
 		return nil, err
 	}
-	return NewClient(client, contract), nil
-}
-
-func NewClient(client ETHBackend, contract *staking.StakingManager) *Client {
 	return &Client{
 		client:   client,
 		contract: contract,
-	}
+	}, nil
 }
 
 type Client struct {

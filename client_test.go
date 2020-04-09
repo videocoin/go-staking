@@ -20,9 +20,10 @@ import (
 type StakingSuite struct {
 	suite.Suite
 
-	FundedKeys []*ecdsa.PrivateKey
-	Backend    *backends.SimulatedBackend
-	Contract   *staking.StakingManager
+	FundedKeys      []*ecdsa.PrivateKey
+	Backend         *backends.SimulatedBackend
+	Contract        *staking.StakingManager
+	ContractAddress common.Address
 }
 
 func (s *StakingSuite) SetupTest() {
@@ -37,7 +38,7 @@ func (s *StakingSuite) SetupTest() {
 
 	s.Backend = backends.NewSimulatedBackend(alloc, ^uint64(0))
 
-	_, _, contract, err := staking.DeployStakingManager(bind.NewKeyedTransactor(s.FundedKeys[0]),
+	address, _, contract, err := staking.DeployStakingManager(bind.NewKeyedTransactor(s.FundedKeys[0]),
 		s.Backend,
 		big.NewInt(10),
 		big.NewInt(100),
@@ -49,6 +50,7 @@ func (s *StakingSuite) SetupTest() {
 	s.Require().NoError(err)
 	s.Backend.Commit()
 	s.Contract = contract
+	s.ContractAddress = address
 }
 
 func (s *StakingSuite) TearDownTest() {
@@ -70,7 +72,9 @@ type ClientSuite struct {
 
 func (s *ClientSuite) SetupTest() {
 	s.StakingSuite.SetupTest()
-	s.StakingClient = NewClient(s.Backend, s.Contract)
+	client, err := NewClient(s.Backend, s.ContractAddress)
+	s.Require().NoError(err)
+	s.StakingClient = client
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	go func() {
 		for {
