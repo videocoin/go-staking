@@ -50,6 +50,10 @@ type Client struct {
 	contract *staking.StakingManager
 }
 
+func (c *Client) GetUnbondingPeriod(ctx context.Context) (*big.Int, error) {
+	return c.contract.UnbondingPeriod(&bind.CallOpts{Context: ctx})
+}
+
 func (c *Client) GetMinDelegation(ctx context.Context) (*big.Int, error) {
 	return c.contract.MinDelegation(&bind.CallOpts{Context: ctx})
 }
