@@ -15,7 +15,8 @@ import (
 )
 
 var (
-	one = big.NewInt(1)
+	zero = big.NewInt(0)
+	one  = big.NewInt(1)
 
 	// ErrTransactionReverted raised when transaction was mined but has failed status.
 	ErrTransactionReverted = errors.New("transaction reverted")
@@ -25,6 +26,8 @@ var (
 	ErrAlreadyRegistered = errors.New("already registered")
 	// ErrNoPendingWithdrawals when there are not available withdrawals to complete.
 	ErrNoPendingWithdrawals = errors.New("no pending withdrawals aviable")
+	// ErrTranscoderNotRegistered is raised when transcoder wasn't registered
+	ErrTranscoderNotRegistered = errors.New("not registered")
 )
 
 // ETHBackend is a subset of ethereum rpc methods that are used in staking Client.
@@ -99,6 +102,9 @@ func (c *Client) GetTranscoder(ctx context.Context, address common.Address) (tcr
 	if err != nil {
 		return tcr, err
 	}
+	if info.Timestamp == nil || info.Timestamp.Cmp(zero) == 0 {
+		return tcr, fmt.Errorf("%w: %s", ErrTranscoderNotRegistered, address.String())
+	}
 	state, err := c.GetTranscoderState(ctx, address)
 	if err != nil {
 		return tcr, err
@@ -110,13 +116,14 @@ func (c *Client) GetTranscoder(ctx context.Context, address common.Address) (tcr
 	delegated := new(big.Int).Sub(info.Total, selfStake)
 	timestamp := info.Timestamp.Uint64()
 	return Transcoder{
-		Address:        address,
-		TotalStake:     info.Total,
-		SelfStake:      selfStake,
-		DelegatedStake: delegated,
-		Capacity:       info.Capacity,
-		State:          state,
-		Timestamp:      timestamp,
+		Address:               address,
+		TotalStake:            info.Total,
+		SelfStake:             selfStake,
+		DelegatedStake:        delegated,
+		Capacity:              info.Capacity,
+		State:                 state,
+		Timestamp:             timestamp,
+		EffectiveMinSelfStake: info.EffectiveMinSelfStake,
 	}, nil
 }
 

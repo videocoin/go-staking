@@ -220,7 +220,7 @@ func (s *ClientSuite) TestWaitWithdrawalCompletedTimeout() {
 	s.Require().True(errors.Is(err, context.DeadlineExceeded))
 }
 
-func (s *ClientSuite) TEstWaithWithdrawalCompletedSuccess() {
+func (s *ClientSuite) TestWaithWithdrawalCompletedSuccess() {
 	var (
 		transcoder  = s.FundedKeys[0]
 		infos       = make(chan WithdrawalInfo, 1)
@@ -253,4 +253,24 @@ func (s *ClientSuite) TEstWaithWithdrawalCompletedSuccess() {
 	case info := <-infos:
 		s.Require().Equal(amount.Int64(), info.Amount.Int64())
 	}
+}
+
+func (s *ClientSuite) TestEffectiveMinSelfStake() {
+	s.Require().NoError(s.StakingClient.RegisterTranscoder(s.ctx, s.FundedKeys[0], 10))
+	addr := crypto.PubkeyToAddress(s.FundedKeys[0].PublicKey)
+	original := big.NewInt(100)
+	s.Require().NoError(s.StakingClient.Delegate(s.ctx, s.FundedKeys[0], addr, original))
+
+	transcoders, err := s.StakingClient.GetBondedTranscoders(s.ctx)
+	s.Require().NoError(err)
+	s.Require().Len(transcoders, 1)
+
+	opts := bind.NewKeyedTransactor(s.FundedKeys[0])
+	_, err = s.Contract.SetSelfMinStake(opts, big.NewInt(1000))
+	s.Require().NoError(err)
+
+	transcoders, err = s.StakingClient.GetBondedTranscoders(s.ctx)
+	s.Require().NoError(err)
+	s.Require().Len(transcoders, 1)
+	s.Require().Equal(original, transcoders[0].EffectiveMinSelfStake)
 }
