@@ -25,6 +25,8 @@ type config struct {
 	ApprovalPeriod time.Duration
 	UpdateMinStake bool
 	MinStake       string
+
+	Slashed []common.Address
 }
 
 func must(err error) {
@@ -72,5 +74,14 @@ func main() {
 		}
 		fmt.Printf("updated min stake to %v\n", stake)
 	}
-
+	for _, address := range c.Slashed {
+		tx, err := contract.Slash(opts, address)
+		must(err)
+		receipt, err := bind.WaitMined(ctx, client, tx)
+		must(err)
+		if receipt.Status == types.ReceiptStatusFailed {
+			panic(fmt.Sprintf("failed to jail %s", address.String()))
+		}
+		fmt.Printf("jailed %s\n", address.String())
+	}
 }
