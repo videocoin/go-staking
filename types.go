@@ -14,6 +14,7 @@ const (
 	StateBonded
 	StateUnbonded
 	StateUnbonding
+	StateUnregistered
 )
 
 type Transcoder struct {

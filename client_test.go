@@ -14,7 +14,7 @@ import (
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/stretchr/testify/suite"
-	"github.com/videocoin/go-protocol/staking"
+	"github.com/videocoin/go-contracts/bindings/staking"
 )
 
 type StakingSuite struct {
@@ -93,7 +93,7 @@ func (s *ClientSuite) TeatDownTest() {
 	s.cancel()
 }
 
-func (s *ClientSuite) TestGetTranscoders() {
+func (s *ClientSuite) TestGetTrascoders() {
 	for _, pkey := range s.FundedKeys {
 		err := s.StakingClient.RegisterTranscoder(context.Background(), pkey, 10)
 		s.Require().NoError(err)
@@ -211,6 +211,12 @@ func (s *ClientSuite) TestTransitionToBondedWithSeveralDelegates() {
 	s.Require().NoError(err)
 	s.Require().Len(transcoders, 1)
 	s.Require().Equal(addr, transcoders[0].Address)
+}
+
+func (s *ClientSuite) TestGetUnregisteredTranscoderState() {
+	state, err := s.StakingClient.GetTranscoderState(s.ctx, common.Address{1, 2})
+	s.Require().NoError(err)
+	s.Require().Equal(StateUnregistered, state)
 }
 
 func (s *ClientSuite) TestWaitWithdrawalCompletedTimeout() {

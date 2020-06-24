@@ -487,6 +487,8 @@ github.com/urfave/cli v1.20.0/go.mod h1:70zkFmudgCuE/ngEzBv17Jvp/497gISqfk5gWijb
 github.com/urfave/cli v1.22.1/go.mod h1:Gos4lmkARVdJ6EkW0WaNv/tZAAMe9V7XWyB60NtXRu0=
 github.com/videocoin/common v0.0.0-20200510014350-b8f6b3848d06 h1:CN0skUQC0C0FMMwM5twtxYTHCR1m1J8FHAjB2gBohwE=
 github.com/videocoin/common v0.0.0-20200510014350-b8f6b3848d06/go.mod h1:x/++8CWmV3LUbQbRAG7YMofbLeoJJI75KoZDhi4lEio=
+github.com/videocoin/go-contracts v0.0.0-20200624120709-7313d75f7c6a h1:UuJTbikVxlwENDqvIVQw/85ryDS+tz3JSg+Dx4/5pzc=
+github.com/videocoin/go-contracts v0.0.0-20200624120709-7313d75f7c6a/go.mod h1:bhyEy8F7+wHLpsMgKWJrXviFrfpZUmOuMteskLKHuCc=
 github.com/videocoin/go-protocol v0.0.8-0.20200519072212-ad37943377e7 h1:wc0buws9prdJypDYHTnd5D2t35YAjOKzWM0N+woCBOI=
 github.com/videocoin/go-protocol v0.0.8-0.20200519072212-ad37943377e7/go.mod h1:HUftoft5tWUl3D3Nt+fsXpGieUcgIUz8dPPy5GSgCnc=
 github.com/videocoin/oauth2 v0.0.0-20200430234055-8f1bc1d0e599 h1:UxKDXdG7mA4eK1pjSHjzW/g5JNSsT+mLrrbrQdLtsac=
